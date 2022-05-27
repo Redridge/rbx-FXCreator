@@ -1,0 +1,3 @@
+[tools]
+rojo = { source = "Roblox/rojo", version = "0.5.4" }
+tarmac = { source = "Roblox/tarmac", version = "0.7.0" }
