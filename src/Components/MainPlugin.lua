@@ -32,7 +32,7 @@ function MainPlugin:render()
 	return self.state.Enabled and Roact.createElement(Widget, {
 		Id = Constants.MainWidgetId,
 		Name = Constants.MainWidgetId,
-		Title = "Collision Groups",
+		Title = "FX Editor",
 		InitialDockState = Enum.InitialDockState.Float,
 		MinimumWindowSize = Vector2.new(220, 175),
 		OnClosed = function()

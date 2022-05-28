@@ -1,10 +1,10 @@
 {
-	"name": "CollisionGroupsEditorDev",
+	"name": "FXCreatorDev",
 	"tree": {
 		"$className": "DataModel",
 		"ServerStorage": {
 			"$className": "ServerStorage",
-			"CollisionGroupsEditor": {
+			"FXCreator": {
 				"$className": "Folder",
 				"Vendor": {
 					"$path": "vendor"

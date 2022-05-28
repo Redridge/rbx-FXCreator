@@ -1,300 +1,214 @@
-local PhysicsService = game:GetService("PhysicsService")
-local RunService = game:GetService("RunService")
+local Selection = game:GetService("Selection")
 
 local Plugin = script.Parent.Parent
 local Constants = require(Plugin.Constants)
+local FX = require(Plugin.FX)
 
 local Roact = require(Plugin.Vendor.Roact)
 local StudioComponents = require(Plugin.Vendor.StudioComponents)
 
-local Button = StudioComponents.Button
-local MainButton = StudioComponents.MainButton
-local ListView = require(script.Parent.ListView)
-local GridView = require(script.Parent.GridView)
-local TabButton = require(script.Parent.TabButton)
-local DeleteGroupWidget = require(script.Parent.DeleteGroupWidget)
-local GroupNameWidget = require(script.Parent.GroupNameWidget)
-local AddToGroup = require(script.Parent.AddToGroup)
+local joinDictionaries = require(Plugin.Vendor.StudioComponents.joinDictionaries)
 
-local MAX_GROUPS = PhysicsService:GetMaxCollisionGroups()
-local POLL_INTERVAL = Constants.PollInterval
+local Widget = StudioComponents.Widget
+local Button = require(Plugin.Components.Button)
+local BaseButton = require(Plugin.Vendor.StudioComponents.BaseButton)
+local MainButton = StudioComponents.MainButton
+local Label = StudioComponents.Label
+local ScrollFrame = StudioComponents.ScrollFrame
+local TextInput = require(Plugin.Components.TextInput)
+local VerticalCollapsibleSection = StudioComponents.VerticalCollapsibleSection
+
+local LABEL_HEIGHT = Constants.LABEL_HEIGHT
+
+local Camera = workspace.Camera
+
+function map(tbl, f)
+    local t = {}
+    for k,v in pairs(tbl) do
+        t[k] = f(v)
+    end
+    return t
+end
 
 local App = Roact.Component:extend("App")
 
 function App:init()
-	local groups = PhysicsService:GetCollisionGroups()
 	self:setState({
-		View = "List",
-		Groups = groups,
-		SelectedGroupId = groups[1].id,
-		CreatingGroup = false,
-		RenamingGroup = false,
-		DeletingGroup = false,
-	})
-	self.setGroupsCollidable = function(id0, id1, collidable)
-		local success, response = pcall(function()
-			local name0 = PhysicsService:GetCollisionGroupName(id0)
-			local name1 = PhysicsService:GetCollisionGroupName(id1)
-			return PhysicsService:CollisionGroupSetCollidable(name0, name1, collidable)
-		end)
-		if not success then
-			warn(response)
-		end
-		self:updateGroups()
-	end
-	self.batchSetCollisionGroup = function(instances, id)
-		local success, response = pcall(function()
-			local name = PhysicsService:GetCollisionGroupName(id)
-			for _, instance in ipairs(instances) do
-				PhysicsService:SetPartCollisionGroup(instance, name)
-			end
-		end)
-		if not success then
-			warn(response)
-		end
-		self:updateGroups()
-	end
-	self.createCollisionGroup = function(name)
-		local success, response = pcall(function()
-			return PhysicsService:CreateCollisionGroup(name)
-		end)
-		if not success then
-			warn(response)
-		end
-		self:updateGroups()
-	end
-	self.renameCollisionGroup = function(oldName, newName)
-		local success, response = pcall(function()
-			return PhysicsService:RenameCollisionGroup(oldName, newName)
-		end)
-		if not success then
-			warn(response)
-		end
-		self:updateGroups()
-	end
-	self.deleteCollisionGroup = function(name)
-		local success, response = pcall(function()
-			return PhysicsService:RemoveCollisionGroup(name)
-		end)
-		if not success then
-			warn(response)
-		end
-		self:updateGroups()
-	end
-end
+		-- Collection
+		collectionCollapsed = false,
+		collectionFx = {},
+		collectionFxN = 0,
+		collectionSelected = "",
+		collectionCreateText = "",
+		-- Elements
+		elementsCollapsed = false,
 
-function App:updateGroups()
-	local groups = PhysicsService:GetCollisionGroups()
-	local prevSelectedGroupId = self.state.SelectedGroupId
-	local nextSelectedGroupId
-	for _, group in ipairs(groups) do
-		if group.id == prevSelectedGroupId then
-			nextSelectedGroupId = prevSelectedGroupId
-			break
-		end
-	end
-	self:setState({
-		Groups = groups,
-		SelectedGroupId = nextSelectedGroupId or groups[1].id,
+		-- Properties
+		propertiesCollapsed = true,
+
+		-- Timeline
+		timelineCollapsed = true,
 	})
 end
 
-local function areGroupsDifferent(groups0, groups1)
-	if #groups0 ~= #groups1 then
-		return true
-	end
-	for i = 1, #groups0 do
-		local item0 = groups0[i]
-		local item1 = groups1[i]
-		if item0.id ~= item1.id then
-			return true
-		elseif item0.name ~= item1.name then
-			return true
-		elseif item0.mask ~= item1.mask then
-			return true
-		end
-	end
-	return false
+function App:updateCollection()
+	local fx, n = FX.getAll()
+	self:setState({
+		collectionFx = fx,
+		collectionFxN = n
+	})
 end
 
 function App:didMount()
-	local nextCheck = os.clock() + POLL_INTERVAL
-	self.pollConnection = RunService.Heartbeat:Connect(function()
-		if os.clock() >= nextCheck then
-			local lastGroups = self.state.Groups
-			local nextGroups = PhysicsService:GetCollisionGroups()
-			if areGroupsDifferent(lastGroups, nextGroups) then
-				self:updateGroups()
+	FX.Dir.ChildAdded:Connect(function()
+		self:updateCollection()
+	end)
+	FX.Dir.ChildRemoved:Connect(function()
+		self:updateCollection()
+	end)
+	Selection.SelectionChanged:Connect(function()
+		local newSel = Selection:Get()
+		if #newSel == 1 then
+			local fx = FX.getFromChild(newSel[1])
+			if fx then
+				self:setState({collectionSelected = fx.Name})
+			else
+				self:setState({collectionSelected = ""})
 			end
-			nextCheck += POLL_INTERVAL
+		else
+			self:setState({collectionSelected = ""})
 		end
 	end)
+	self:updateCollection()
 end
 
 function App:willUnmount()
-	self.pollConnection:Disconnect()
+end
+
+function App:getCollectionRow(fx)
+	return Roact.createElement(Button, {
+		OnActivated = function()
+			self:setState({collectionSelected = fx.Name})
+		end,
+		Text = fx.Name .. "    ",
+		Selected = fx.Name == self.state.collectionSelected,
+	})
+end
+
+function App:getCollection(props)
+	local absY = self.state.collectionFxN * LABEL_HEIGHT
+	local maxY = 5 * LABEL_HEIGHT
+	local rows = map(self.state.collectionFx, function(v) return self:getCollectionRow(v) end)
+	local Layout = Roact.createElement("UIListLayout", {
+				SortOrder = Enum.SortOrder.Name
+			})
+	rows.Layout = Layout
+
+	return Roact.createElement("ScrollingFrame", joinDictionaries({
+		Size = UDim2.new(1, 0, 0, math.min(absY, maxY)),
+		CanvasSize = UDim2.new(1, 0, 0, absY),
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 0,
+		BackgroundTransparency = 1,
+	}, props),
+		rows
+	)
 end
 
 function App:render()
-	local isMaxGroups = #self.state.Groups >= MAX_GROUPS
-	local isModalActive = self.state.CreatingGroup or self.state.RenamingGroup or self.state.DeletingGroup
-
-	local selectedGroupName = nil
-	if self.state.SelectedGroupId then
-		selectedGroupName = PhysicsService:GetCollisionGroupName(self.state.SelectedGroupId)
-	end
-
 	return Roact.createFragment({
-		CreateWidget = self.state.CreatingGroup and Roact.createElement(GroupNameWidget, {
-			Title = "Create Group",
-			Action = "Create",
-			OnClosed = function()
-				self:setState({ CreatingGroup = false })
-			end,
-			OnSubmitted = function(name)
-				self.createCollisionGroup(name)
-				self:setState({ CreatingGroup = false })
-			end,
-		}),
-		RenameWidget = self.state.RenamingGroup and Roact.createElement(GroupNameWidget, {
-			Title = string.format("Rename Group (%s)", selectedGroupName),
-			Action = "Rename",
-			OnClosed = function()
-				self:setState({ RenamingGroup = false })
-			end,
-			OnSubmitted = function(name)
-				self.renameCollisionGroup(selectedGroupName, name)
-				self:setState({ RenamingGroup = false })
-			end,
-		}),
-		DeleteWidget = self.state.DeletingGroup and Roact.createElement(DeleteGroupWidget, {
-			Title = string.format("Delete Group (%s)", selectedGroupName),
-			GroupName = selectedGroupName,
-			OnClosed = function()
-				self:setState({ DeletingGroup = false })
-			end,
-			OnActivated = function()
-				self.deleteCollisionGroup(selectedGroupName)
-				self:setState({ DeletingGroup = false })
-			end,
-		}),
-		Tabs = Roact.createElement("Frame", {
-			Size = UDim2.new(1, 0, 0, 30),
+		MainWindow = Roact.createElement("Frame", {
+			Size = UDim2.new(1, 0, 1, 0),
 			BackgroundTransparency = 1,
 		}, {
-			Layout = Roact.createElement("UIListLayout", {
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				FillDirection = Enum.FillDirection.Horizontal,
+			CollapsiblesList = Roact.createElement("UIListLayout", {
+				SortOrder = Enum.SortOrder.LayoutOrder
 			}),
-			ListViewButton = Roact.createElement(TabButton, {
+			CollectionHeader = Roact.createElement(VerticalCollapsibleSection, {
+				HeaderText = "Collection",
+				Collapsed = self.state.collectionCollapsed,
+				OnToggled = function()
+					self:setState({collectionCollapsed = not self.state.collectionCollapsed})
+				end,
 				LayoutOrder = 0,
-				Size = UDim2.fromScale(0.5, 1),
-				Text = "List View",
-				Selected = self.state.View == "List",
-				OnActivated = function()
-					self:updateGroups()
-					self:setState({ View = "List" })
-				end,
-				Disabled = isModalActive,
 			}),
-			GridViewButton = Roact.createElement(TabButton, {
-				LayoutOrder = 1,
-				Size = UDim2.fromScale(0.5, 1),
-				Text = "Grid View",
-				Selected = self.state.View == "Grid",
-				OnActivated = function()
-					self:updateGroups()
-					self:setState({ View = "Grid" })
-				end,
-				Disabled = isModalActive,
+			Collection = self:getCollection({
+				Visible = not self.state.collectionCollapsed,
+				LayoutOrder = 10,
 			}),
-		}),
-		Inner = Roact.createElement("Frame", {
-			AnchorPoint = Vector2.new(0, 1),
-			Position = UDim2.fromScale(0, 1),
-			Size = UDim2.new(1, 0, 1, -31),
-			BackgroundTransparency = 1,
-		}, {
-			Padding = Roact.createElement("UIPadding", {
-				PaddingLeft = UDim.new(0, 4),
-				PaddingRight = UDim.new(0, 4),
-				PaddingTop = UDim.new(0, 4),
-				PaddingBottom = UDim.new(0, 4),
-			}),
-			Views = Roact.createElement("Frame", {
-				Size = UDim2.new(1, 0, 1, -32),
+			CollectionCreate = Roact.createElement("Frame", {
+				Size = UDim2.new(1, 0, 0, LABEL_HEIGHT),
+				Visible = not self.state.collectionCollapsed,
+				LayoutOrder = 20,
 				BackgroundTransparency = 1,
 			}, {
-				List = self.state.View == "List" and Roact.createElement(ListView, {
-					Groups = self.state.Groups,
-					SelectedGroupId = self.state.SelectedGroupId,
-					SetSelectedGroupId = function(id)
-						self:setState({ SelectedGroupId = id })
-					end,
-					SetGroupsCollidable = self.setGroupsCollidable,
-					Disabled = isModalActive,
+				TextInput = Roact.createElement(TextInput, {
+					Size = UDim2.new(.5, -4, 0, LABEL_HEIGHT-4),
+					Position = UDim2.fromOffset(2, 2),
+					AnchorPoint = Vector2.new(0, 0),
+					Text = self.state.collectionCreateText,
+					OnChanged = function(txt)
+						self:setState({collectionCreateText = txt})
+					end
 				}),
-				Grid = self.state.View == "Grid" and Roact.createElement(GridView, {
-					Groups = self.state.Groups,
-					SetGroupsCollidable = self.setGroupsCollidable,
-					Disabled = isModalActive,
-				}),
+				Button = Roact.createElement(Button, {
+					Size = UDim2.new(.5, 0, 0, LABEL_HEIGHT),
+					Position = UDim2.fromScale(1, .5),
+					AnchorPoint = Vector2.new(1, .5),
+					Text = "Create",
+					TextXAlignment = Enum.TextXAlignment.Center,
+					Selected = true,
+					OnActivated = function()
+						if self.state.collectionCreateText ~= "" then
+							FX.create(self.state.collectionCreateText)
+							self:setState({collectionCreateText = ""})
+						end
+					end
+				})
 			}),
-			Actions = Roact.createElement("Frame", {
-				AnchorPoint = Vector2.new(0, 1),
-				Position = UDim2.fromScale(0, 1),
-				Size = UDim2.new(1, 0, 0, 28),
-				BackgroundTransparency = 1,
-			}, {
-				Layout = Roact.createElement("UIListLayout", {
-					SortOrder = Enum.SortOrder.LayoutOrder,
-					FillDirection = Enum.FillDirection.Horizontal,
-					Padding = UDim.new(0, 4),
-				}),
-				Create = Roact.createElement(MainButton, {
-					LayoutOrder = 0,
-					Size = UDim2.new(0, 28, 1, 0),
-					Text = "",
-					OnActivated = function()
-						self:setState({ CreatingGroup = true })
-					end,
-					Disabled = isModalActive or isMaxGroups,
-				}, {
-					Icon = Roact.createElement("ImageLabel", {
-						AnchorPoint = Vector2.new(0.5, 0.5),
-						Position = UDim2.fromScale(0.5, 0.5),
-						Size = UDim2.fromOffset(16, 16),
-						BackgroundTransparency = 1,
-						Image = "rbxassetid://6688839343",
-						ImageTransparency = (isModalActive or isMaxGroups) and 0.75 or 0,
-					}),
-				}),
-				AddTo = self.state.View == "List" and Roact.createElement(AddToGroup, {
-					BatchSetCollisionGroup = self.batchSetCollisionGroup,
-					SelectedGroupId = self.state.SelectedGroupId,
-					Disabled = isModalActive,
-				}),
-				Rename = self.state.View == "List" and Roact.createElement(Button, {
-					LayoutOrder = 2,
-					Size = UDim2.new(0.32, -18, 1, 0),
-					Text = "Rename",
-					OnActivated = function()
-						self:setState({ RenamingGroup = true })
-					end,
-					Disabled = self.state.SelectedGroupId == 0 or isModalActive,
-				}),
-				Delete = self.state.View == "List" and Roact.createElement(Button, {
-					LayoutOrder = 3,
-					Size = UDim2.new(0.3, -18, 1, 0),
-					Text = "Delete",
-					OnActivated = function()
-						self:setState({ DeletingGroup = true })
-					end,
-					Disabled = self.state.SelectedGroupId == 0 or isModalActive,
-				}),
+			-- ElementsHeader = Roact.createElement(VerticalCollapsibleSection, {
+				-- HeaderText = "Elements",
+				-- LayoutOrder = 100,
+				-- Collapsed = self.state.elementsCollapsed,
+				-- OnToggled = function()
+					-- self:setState({elementsCollapsed = not self.state.elementsCollapsed})
+				-- end,
+			-- }),
+			-- Elements = Roact.createElement("Frame", {
+				-- Size = UDim2.new(1, 0, 0, 30),
+				-- BackgroundColor3 = Color3.new(1,0,0),
+				-- Visible = not self.state.elementsCollapsed,
+				-- LayoutOrder = 110,
+			-- }),
+			PropertiesHeader = Roact.createElement(VerticalCollapsibleSection, {
+				HeaderText = "Properties",
+				LayoutOrder = 200,
+				Collapsed = self.state.propertiesCollapsed,
+				OnToggled = function()
+					self:setState({propertiesCollapsed = not self.state.propertiesCollapsed})
+				end,
 			}),
-		}),
-	})
+			Properties = Roact.createElement("Frame", {
+				Size = UDim2.new(1, 0, 0, 30),
+				BackgroundColor3 = Color3.new(1,1,0),
+				Visible = not self.state.propertiesCollapsed,
+				LayoutOrder = 210,
+			}),
+			TimelineHeader = Roact.createElement(VerticalCollapsibleSection, {
+				HeaderText = "Timeline",
+				LayoutOrder = 300,
+				Collapsed = self.state.timelineCollapsed,
+				OnToggled = function()
+					self:setState({timelineCollapsed = not self.state.timelineCollapsed})
+				end,
+			}),
+			Timeline = Roact.createElement("Frame", {
+				Size = UDim2.new(1, 0, 0, 30),
+				BackgroundColor3 = Color3.new(1,0,1),
+				Visible = not self.state.timelineCollapsed,
+				LayoutOrder = 310,
+			}),
+		})})
 end
 
 return App

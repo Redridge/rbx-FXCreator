@@ -3,12 +3,12 @@ local Plugin = script.Parent
 local Roact = require(Plugin.Vendor.Roact)
 local MainPlugin = require(Plugin.Components.MainPlugin)
 
-local toolbar = plugin:CreateToolbar("Collision Groups")
+local toolbar = plugin:CreateToolbar("FX Creator")
 local button = toolbar:CreateButton(
-	"thirdPartyCollisionGroupsToggleWidget",
-	"Collision Groups",
-	"rbxasset://textures/CollisionGroupsEditor/ToolbarIcon.png",
-	"Toggle Widget"
+	"FXCreatorToggleWidget",
+	"FX Creator",
+	"rbxassetid://9741377068",
+	"Toggle"
 )
 button.ClickableWhenViewportHidden = true
 
