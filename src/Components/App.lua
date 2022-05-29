@@ -2,7 +2,7 @@ local Selection = game:GetService("Selection")
 
 local Plugin = script.Parent.Parent
 local Constants = require(Plugin.Constants)
-local FX = require(Plugin.FX)
+local FX = require(Plugin.FXSaver)
 
 local Roact = require(Plugin.Vendor.Roact)
 local StudioComponents = require(Plugin.Vendor.StudioComponents)
@@ -16,11 +16,12 @@ local MainButton = StudioComponents.MainButton
 local Label = StudioComponents.Label
 local ScrollFrame = StudioComponents.ScrollFrame
 local TextInput = require(Plugin.Components.TextInput)
+local Label = require(Plugin.Components.Label)
+local Timeline = require(Plugin.Components.Timeline)
 local VerticalCollapsibleSection = StudioComponents.VerticalCollapsibleSection
 
 local LABEL_HEIGHT = Constants.LABEL_HEIGHT
 
-local Camera = workspace.Camera
 
 function map(tbl, f)
     local t = {}
@@ -28,6 +29,10 @@ function map(tbl, f)
         t[k] = f(v)
     end
     return t
+end
+
+function round(t, d)
+    return math.round(t * math.pow(10, d))/math.pow(10, d)
 end
 
 local App = Roact.Component:extend("App")
@@ -44,11 +49,26 @@ function App:init()
 		elementsCollapsed = false,
 
 		-- Properties
-		propertiesCollapsed = true,
+		propertiesCollapsed = false,
+		propertiesSelected = nil,
+		propertiesTracked = {},
+		propertiesTrackedN = 0,
+		propertyChanged = "",
+		propertiesLf = NumberRange.new(0,0),
+		inputLfMin = nil,
+		inputLfMinFocused = false,
+		inputLfMax = nil,
+		inputLfMaxFocused = false,
+
+		propertiesGlobalT = 0,
+		inputGlobalT = nil,
+		inputGlobalTFocused = false,
 
 		-- Timeline
 		timelineCollapsed = true,
 	})
+
+	self.propertyListener = nil
 end
 
 function App:updateCollection()
@@ -57,6 +77,30 @@ function App:updateCollection()
 		collectionFx = fx,
 		collectionFxN = n
 	})
+end
+
+local ignoredProps = {
+	Attributes = true,
+	Parent = true,
+	Color3uint8 = true,
+	Mass = true,
+	AssemblyMass = true,
+}
+function App:trackProperties(inst)
+	if self.propertyListener then
+		self.propertyListener:Disconnect()
+	end
+	if inst then
+		local kfs, n, lf = FX.kfParse(inst)
+		if lf == nil then lf = NumberRange.new(0) end
+		self:setState({propertiesTracked = kfs, propertiesTrackedN = n, propertiesLf = lf, propertiesSelected = inst})
+		self.propertyListener = inst.Changed:Connect(function(property)
+			if ignoredProps[property] then return end
+			self:setState({propertyChanged = property})
+		end)
+		return
+	end
+	self:setState({propertiesTracked = {}, propertiesTrackedN = 0, propertiesLf = NumberRange.new(0), propertiesSelected = Roact.None})
 end
 
 function App:didMount()
@@ -71,12 +115,15 @@ function App:didMount()
 		if #newSel == 1 then
 			local fx = FX.getFromChild(newSel[1])
 			if fx then
-				self:setState({collectionSelected = fx.Name})
+				self:setState({collectionSelected = fx.Name, propertiesGlobalT = fx:GetAttribute("t") or 0})
+				self:trackProperties(newSel[1])
 			else
-				self:setState({collectionSelected = ""})
+				self:setState({collectionSelected = "", propertyChanged = "", propertiesGlobalT = 0})
+				self:trackProperties()
 			end
 		else
-			self:setState({collectionSelected = ""})
+			self:setState({collectionSelected = "", propertyChanged = "", propertiesGlobalT = 0})
+			self:trackProperties()
 		end
 	end)
 	self:updateCollection()
@@ -115,7 +162,54 @@ function App:getCollection(props)
 	)
 end
 
+function App:getPropertiesRow(property, kfs)
+	local n = 0
+	for _, _ in pairs(kfs) do
+		n += 1
+	end
+	return Roact.createElement(Label, {
+		Text = "    " .. property .. "  -  " .. tostring(n),
+		TextXAlignment = Enum.TextXAlignment.Left
+	})
+end
+
+function App:getProperties(props)
+	local absY = self.state.propertiesTrackedN * LABEL_HEIGHT
+	local maxY = 5 * LABEL_HEIGHT
+	local rows = {}
+	for p, kfs in pairs(self.state.propertiesTracked) do
+		rows[p] = self:getPropertiesRow(p, kfs)
+	end 
+	local Layout = Roact.createElement("UIListLayout", {
+				SortOrder = Enum.SortOrder.Name
+			})
+	rows._Layout = Layout
+
+	return Roact.createElement("ScrollingFrame", joinDictionaries({
+		Size = UDim2.new(1, 0, 0, math.min(absY, maxY)),
+		CanvasSize = UDim2.new(1, 0, 0, absY),
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 0,
+		BackgroundTransparency = 1,
+	}, props),
+		rows
+	)
+end
+
 function App:render()
+	local timelineProps = {}
+	if self.state.collectionSelected ~= ""  then
+		local lfs, n = FX.getLfs(FX.get(self.state.collectionSelected))
+		timelineProps.Lifetimes = lfs
+		timelineProps.LifetimesN = n
+		if self.state.propertiesSelected then
+			local kfs, n, lf = FX.kfParse(self.state.propertiesSelected)
+			timelineProps.Keyframes = kfs
+			timelineProps.KeyframesN = n
+			timelineProps.Lifetime = lf
+		end
+	end
+
 	return Roact.createFragment({
 		MainWindow = Roact.createElement("Frame", {
 			Size = UDim2.new(1, 0, 1, 0),
@@ -188,11 +282,93 @@ function App:render()
 					self:setState({propertiesCollapsed = not self.state.propertiesCollapsed})
 				end,
 			}),
-			Properties = Roact.createElement("Frame", {
-				Size = UDim2.new(1, 0, 0, 30),
-				BackgroundColor3 = Color3.new(1,1,0),
+			GlobalTAndLf = Roact.createElement("Frame", {
+				Size = UDim2.new(1, 0, 0, LABEL_HEIGHT),
+				LayoutOrder = 205,
+				BackgroundTransparency = 1,
+				Visible = (not self.state.propertiesCollapsed) and self.state.collectionSelected,
+			}, {
+				CollectionGlobalT = Roact.createElement("Frame", {
+					Size = UDim2.fromScale(.5, 1),
+					BackgroundColor3 = Color3.new(.5, .5, 1),
+					BackgroundTransparency = 1,
+				}, {
+                	Padding = Roact.createElement("UIPadding", {
+                    	PaddingBottom = UDim.new(0, 2),
+                    	PaddingTop = UDim.new(0, 1),
+                    	PaddingLeft = UDim.new(0.1, 0),
+                    	PaddingRight = UDim.new(0.1, 0),
+                	}),
+                	_Layout = Roact.createElement("UIListLayout", {
+                    	SortOrder = Enum.SortOrder.LayoutOrder,
+                    	FillDirection = Enum.FillDirection.Horizontal,
+                    	HorizontalAlignment = Enum.HorizontalAlignment.Left,
+                    	Padding = UDim.new(0, 10)
+                	}),
+                	GlobalTText = Roact.createElement(Label, {
+                    	Size = UDim2.fromOffset(Constants.LABEL_HEIGHT*2, Constants.LABEL_HEIGHT-3),
+                    	Text = "GlobalT:",
+                    	LayoutOrder = 15,
+                    	BackgroundTransparency = 1,
+                	}),
+					GlobalTInput = Roact.createElement(TextInput, {
+                    	LayoutOrder = 20,
+						Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
+						Text = if self.state.inputGlobalTFocused then self.state.inputGlobalT else self.state.propertiesGlobalT,
+                    	TextXAlignment = Enum.TextXAlignment.Center,
+						OnChanged = function(txt)
+							self:setState({inputGlobalT = txt})
+						end,
+                    	OnFocusLost = function()
+							local c = self.state.inputGlobalT
+                        	if c then
+                            	local newT = tonumber(c)
+                            	if newT and newT > 0 then
+                                	self:setState({inputGlobalT = Roact.None, inputGlobalTFocused = false, propertiesGlobalT = newT})
+									FX.setGlobalT(FX.get(self.state.collectionSelected), newT)
+                                	return
+                            	end
+                            	self:setState({inputGlobalT = Roact.None, inputGlobalTFocused = false})
+                        	end
+                    	end,
+                    	OnFocused = function()
+                        	self:setState({inputGlobalT = "", inputGlobalTFocused = true})
+                    	end,
+					}),
+				}),
+			}),
+			Properties = self:getProperties({
 				Visible = not self.state.propertiesCollapsed,
 				LayoutOrder = 210,
+			}),
+			PropertiesCreate = Roact.createElement("Frame", {
+				Size = UDim2.new(1, 0, 0, LABEL_HEIGHT),
+				BackgroundTransparency = 1,
+				Visible = (not self.state.propertiesCollapsed) and self.state.propertiesSelected and (self.state.propertyChanged ~= ""),
+				LayoutOrder = 220,
+			}, {
+				Label = Roact.createElement(Label, {
+					Size = UDim2.new(.5, 0, 0, LABEL_HEIGHT),
+					AnchorPoint = Vector2.new(0, 0),
+					Text = "    " .. self.state.propertyChanged,
+					TextXAlignment = Enum.TextXAlignment.Left,
+				}),
+				Button = Roact.createElement(Button, {
+					Size = UDim2.new(.5, 0, 0, LABEL_HEIGHT),
+					Position = UDim2.fromScale(1, .5),
+					AnchorPoint = Vector2.new(1, .5),
+					Text = "Track",
+					TextXAlignment = Enum.TextXAlignment.Center,
+					Selected = true,
+					OnActivated = function()
+						local rbx = self.state.propertiesSelected
+						if not rbx then return end
+
+						local prop = self.state.propertyChanged
+						FX.kfSet(rbx, 1, prop, rbx[prop])
+						self:trackProperties(rbx)
+					end
+				})
 			}),
 			TimelineHeader = Roact.createElement(VerticalCollapsibleSection, {
 				HeaderText = "Timeline",
@@ -202,12 +378,19 @@ function App:render()
 					self:setState({timelineCollapsed = not self.state.timelineCollapsed})
 				end,
 			}),
-			Timeline = Roact.createElement("Frame", {
-				Size = UDim2.new(1, 0, 0, 30),
-				BackgroundColor3 = Color3.new(1,0,1),
+			Timeline = Roact.createElement(Timeline, joinDictionaries({
 				Visible = not self.state.timelineCollapsed,
 				LayoutOrder = 310,
-			}),
+				OnGlobalTimeChanged = function(newT)
+           			self:setState({propertiesGlobalT = newT})
+					FX.setGlobalT(FX.get(self.state.collectionSelected), newT)
+				end,
+				OnLifetimeChanged = function(newR)
+					FX.kfSetLf(self.state.propertiesSelected, newR)
+           			self:setState({propertiesLf = newR})
+				end,
+				MaxT = self.state.propertiesGlobalT,
+			}, timelineProps)),
 		})})
 end
 

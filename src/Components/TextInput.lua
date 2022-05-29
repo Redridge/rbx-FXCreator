@@ -10,10 +10,14 @@ local defaultProps = {
 	TextXAlignment = Enum.TextXAlignment.Left,
 	ClearTextOnFocus = true,
     OnChanged = function() end,
+    OnFocused = function() end,
+    OnFocusLost = function() end,
 }
 
 local propsToScrub = {
     OnChanged = Roact.None,
+    OnFocused = Roact.None,
+    OnFocusLost = Roact.None,
 }
 
 local TextInput = Roact.Component:extend("TextInput")
@@ -26,12 +30,12 @@ function TextInput:init()
 end
 
 function TextInput:render()
-	local props = self.props
-	return Roact.createElement("TextBox", joinDictionaries(defaultProps, {
+	local props = joinDictionaries(defaultProps, self.props)
+	return Roact.createElement("TextBox", joinDictionaries({
 		Size = UDim2.new(1, -4, 0, Constants.LABEL_HEIGHT-4),
 		[Roact.Change.Text] = self.onChanged,
-		[Roact.Event.Focused] = function() self:setState({Focused = true}) end,
-		[Roact.Event.FocusLost] = function() self:setState({Focused = false}) end,
+		[Roact.Event.Focused] = function() self:setState({Focused = true}); props.OnFocused() end,
+		[Roact.Event.FocusLost] = function() self:setState({Focused = false}); props.OnFocusLost() end,
 		TextSize = 14,
 		Font = Enum.Font.GothamBlack,
 		BackgroundColor3 = Color3.fromRGB(252, 252, 252),

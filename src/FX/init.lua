@@ -1,77 +1,105 @@
-local Constants = require(script.Parent.Constants)
+local RunService = game:GetService("RunService")
+local FXParser = require(game.ReplicatedStorage.Common.Modules.FX.FXParser)
 
-local fxDir = Constants.FXDirLoc:FindFirstChild(Constants.FXDirName)
-if not fxDir then
-    fxDir = Instance.new("Folder", Constants.FXDirLoc)
-    fxDir.Name = Constants.FXDirName
+local FX = {}
+FX.__type = "FX"
+FX.__index = FX
+
+function FX.new(FXmodel: Instance)
+
+    local self = setmetatable({
+        meta = FXParser.parsers[FXmodel],
+        timer = 0,
+        speed = 1,
+        loop = true,
+        pingpong = true,
+    }, FX)
+
+    self.model, self.keyframedInstancesMap = self.meta:GetMappedClone()
+    -- self.model = self.meta.model:Clone()
+
+    return self
 end
 
-function getAll()
-    local c = fxDir:GetChildren()
-    local res = {}
-    local n = 0
-    for i = #c, 1, -1 do
-        if not c[i]:GetAttribute("fx") then
-            continue
+function FX:Step(deltaTime: number)
+    local deltaTime = deltaTime * self.speed
+    if self.timer + deltaTime > self.meta.globalTime then
+        if self.loop then
+            if self.pingpong then
+                self.timer = self.meta.globalTime - (self.timer + deltaTime - self.meta.globalTime)
+                self:AdjustSpeed(self.speed * -1)
+            else
+                self.timer = self.timer + deltaTime - self.meta.globalTime
+            end
+        else
+            self.timer = self.meta.globalTime
+            self:Stop()
+            return
         end
-        res[c[i].Name] = c[i]
-        n += 1
-    end
-    return res, n
-end
-
-function get(name)
-    local c = fxDir:FindFirstChild(name)
-    if not c:GetAttribute("fx") then
-        return nil
-    end
-    return c
-end
-
-function getFromChild(inst)
-    if not inst then
-        return
-    elseif inst:GetAttribute("fx") then
-        return inst
+    elseif self.timer + deltaTime < 0 then
+        if self.loop then
+            if self.pingpong then
+                self.timer = (- deltaTime - self.timer)
+                self:AdjustSpeed(self.speed * -1)
+            else
+                self.timer = self.meta.globalTime + (deltaTime - self.timer)
+            end
+        else
+            self.timer = 0
+            self:Stop()
+            return
+        end
     else
-        return getFromChild(inst.Parent)
+        self.timer += deltaTime
+    end
+
+    local alpha = self.timer / self.meta.globalTime
+    for inst, keyframeInfo in pairs(self.keyframedInstancesMap) do
+        local warpedAlpha = math.clamp(alpha, keyframeInfo.lf.Min, keyframeInfo.lf.Max)
+        for attrName, valSequence in pairs(keyframeInfo.valueSequences) do
+            inst[attrName] = valSequence:GetValue(alpha)
+            -- print(math.round(valSequence:GetValue(alpha)*100)/100, math.round(alpha*100)/100)
+        end
     end
 end
 
-function create(name)
-    if fxDir:FindFirstChild(name) then return nil end
-
-    local p = Instance.new("Part")
-    p.Name = "Root"
-    p.Transparency = 1
-    p.Anchored = true
-    p.CanCollide = false
-    p.CanTouch = false
-    p.Size = Vector3.new(1,1,1)
-
-    local fx = Instance.new("Model")
-    fx.Name = name
-    fx.PrimaryPart = p
-    fx:SetAttribute("fx", true)
-    p.Parent = fx
-    fx.Parent = fxDir
+function FX:Play()
+    if RunService:IsClient() then
+        local bindName = tostring(self)
+        RunService:BindToRenderStep(bindName, Enum.RenderPriority.Character.Value, function(deltaTime)
+            self:Step(deltaTime)
+        end)
+    else
+        self.heartBeat = RunService.Heartbeat:Connect(function(deltaTime)
+            self:Step(deltaTime)
+        end)
+    end
 end
 
-function remove(name)
-    local fx = fxDir:FindFirstChild(name)
-    if not fx then return end
-    fx:Destroy()
-    return true
+function FX:Pause()
+    if RunService:IsClient() then
+        local bindName = tostring(self)
+        RunService:UnbindFromRenderStep(bindName)
+    else
+        self.heartBeat:Disconnect()
+    end
 end
 
-return {
-    get = get,
-    getAll = getAll,
-    getFromChild = getFromChild,
+function FX:Stop()
+    self:Pause()
+    self.timer = 0
+end
 
-    create = create,
+function FX:AdjustSpeed(speed: number)
+    self.speed = speed
+end
 
-    remove = remove,
+function FX:SetLooped(looped: boolean)
+    self.loop = looped
+end
 
-    Dir = fxDir,
-}
+function FX:SetPingPong(pingpong: boolean)
+    self.pingpong = pingpong
+end
+
+return FX

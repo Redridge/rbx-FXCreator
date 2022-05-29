@@ -7,7 +7,7 @@ local toolbar = plugin:CreateToolbar("FX Creator")
 local button = toolbar:CreateButton(
 	"FXCreatorToggleWidget",
 	"FX Creator",
-	"rbxassetid://9741377068",
+	"rbxasset://textures/glow.png",
 	"Toggle"
 )
 button.ClickableWhenViewportHidden = true
