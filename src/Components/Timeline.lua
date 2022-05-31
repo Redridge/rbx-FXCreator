@@ -147,7 +147,7 @@ function Timeline:getAllFX()
     local lfs = self.props.Lifetimes
 
     if not lfs then return {} end
-    for rbx, lf in pairs(self.props.Lifetimes) do
+    for rbx, lf in pairs(lfs) do
         fx[rbx.Name] = Roact.createElement("Frame", {
             Size = UDim2.new(1, 0, 0, Constants.LABEL_HEIGHT/2),
             BackgroundTransparency = 1,
@@ -163,6 +163,63 @@ function Timeline:getAllFX()
     })
     end
     return fx
+end
+
+function Timeline:getKfs(prop)
+    local kfs = {}
+    for kf, val in pairs(prop) do
+        kfs[kf] = Roact.createElement("ImageButton", {
+            Size = UDim2.fromOffset(Constants.LABEL_HEIGHT/1.5, Constants.LABEL_HEIGHT/1.5),
+            AnchorPoint = Vector2.new(.5, 0),
+            Position = UDim2.fromScale(tostring(kf), 0),
+            Image = "rbxasset://textures/AnimationEditor/img_key_indicator_inner.png",
+            ImageColor3 = Color3.new(1,1,1),
+            BackgroundTransparency = 1,
+        }, {
+            Outline = Roact.createElement("ImageLabel", {
+                Size = UDim2.fromScale(1,1),
+                Position = UDim2.fromScale(.5, .5),
+                AnchorPoint = Vector2.new(.5, .5),
+                Image = "rbxasset://textures/AnimationEditor/img_key_indicator_border.png",
+                ImageColor3 = Color3.fromRGB(0, 162, 255),
+                BackgroundTransparency = 1,
+            })
+        })
+    end
+
+    return kfs
+end
+
+function Timeline:getAllKfs()
+    local props = {}
+    local kfs = self.props.Keyframes
+
+    if not kfs then return {} end
+
+    for prop, ks in pairs(kfs) do
+        if Constants.exceptedProps[prop] then continue end
+
+        local bgColor = Hash.getColor(prop)
+        props[prop] = Roact.createElement("TextButton", {
+            Size = UDim2.new(1, 0, 0, Constants.LABEL_HEIGHT/1.5),
+            BorderSizePixel = 0,
+            BackgroundColor3 = bgColor,
+            Text = prop,
+            TextColor3 = Hash.darkenColor(bgColor),
+            TextScaled = true,
+            Font = Enum.Font.GothamBlack,
+            BackgroundTransparency = 0,
+            AutoButtonColor = false,
+        }, joinDictionaries({
+            TimelineSnaps = Roact.createElement("Frame", {
+                Size = UDim2.fromScale(1,1),
+                BackgroundTransparency = 1,
+                BackgroundColor3 = Color3.new(.5,1,.5),
+                ZIndex = -151,
+            }, self:getSnapLines()),
+        }, self:getKfs(ks)))
+    end
+    return props
 end
 
 function Timeline:render()
@@ -181,19 +238,20 @@ function Timeline:render()
 
 	return Roact.createElement("Frame", joinDictionaries(defaultProps, self.props, {
         Size = UDim2.new(1, 0, 0, timeFrameY + Constants.LABEL_HEIGHT),
+        BackgroundTransparency = 1,
     }, propsToScrub), {
         _Layout = Roact.createElement("UIListLayout", {
             SortOrder = Enum.SortOrder.LayoutOrder
         }),
         TopBar = Roact.createElement("Frame", {
             Size = UDim2.new(1, 0, 0, Constants.LABEL_HEIGHT),
-            BackgroundTransparency = .5,
+            BackgroundTransparency = 1,
             BackgroundColor3 = Color3.new(1,.5,.5),
             LayoutOrder = 0,
         }, {
             LeftBar = Roact.createElement("Frame", {
                 Size = UDim2.new(.4, 0, 0, Constants.LABEL_HEIGHT),
-                BackgroundTransparency = .5,
+                BackgroundTransparency = 1,
                 BackgroundColor3 = Color3.new(1,.5,.5),
             }, {
                 Padding = Roact.createElement("UIPadding", {
@@ -270,7 +328,7 @@ function Timeline:render()
             RightBar = Roact.createElement("Frame", {
                 Size = UDim2.new(.6, 0, 0, Constants.LABEL_HEIGHT),
                 Position = UDim2.fromScale(.4, 0),
-                BackgroundTransparency = .5,
+                BackgroundTransparency = 1,
                 BackgroundColor3 = Color3.new(1,.5,.5),
             }, {
                 Padding = Roact.createElement("UIPadding", {
@@ -372,8 +430,10 @@ function Timeline:render()
         }),
         TimeFrameGlobal = Roact.createElement("Frame", {
             Size = UDim2.new(1, 0, 0, timeFrameY),
-            BackgroundTransparency = .5,
-            BackgroundColor3 = Color3.new(.5,1,.5),
+            BackgroundTransparency = 0,
+            BackgroundColor3 = Color3.new(1,1,1),
+            BorderSizePixel = 2,
+            BorderColor3 = Color3.new(.5, .5, .5),
             LayoutOrder = 100,
         }, {
             TimeBar = Roact.createElement("Frame", {
@@ -388,13 +448,13 @@ function Timeline:render()
             }),
             TimelineSnaps = Roact.createElement("Frame", {
                 Size = UDim2.fromScale(1,1),
-                BackgroundTransparency = .5,
+                BackgroundTransparency = 1,
                 BackgroundColor3 = Color3.new(.5,1,.5),
                 ZIndex = 100,
             }, self:getSnapLines()),
             TimelineContainer = Roact.createElement("Frame", {
                 Size = UDim2.fromScale(1,1),
-                BackgroundTransparency = .5,
+                BackgroundTransparency = 1,
                 BackgroundColor3 = Color3.new(.5,1,.5),
                 ZIndex = 150,
             }, joinDictionaries({
@@ -403,15 +463,15 @@ function Timeline:render()
             }, timelineRender)),
         }),
         TimeFrameSingleBar = Roact.createElement("Frame", {
-            Size = UDim2.new(1, 0, 0, Constants.LABEL_HEIGHT+2),
-            BackgroundTransparency = .5,
+            Size = UDim2.new(1, 0, 0, Constants.LABEL_HEIGHT*1.5),
+            BackgroundTransparency = 1,
             BackgroundColor3 = Color3.new(1, .5, .5),
             LayoutOrder = 150,
             Visible = keyframesN > 0,
         }, {
 			PropertiesLf = Roact.createElement("Frame", {
 				Size = UDim2.fromScale(.5, 1),
-				Position = UDim2.fromScale(.5, 0),
+				Position = UDim2.fromScale(.5, .20),
 				BackgroundColor3 = Color3.new(1, .5, .5),
 				BackgroundTransparency = 1,
 				Visible = self.state.propertiesSelected,
@@ -487,39 +547,31 @@ function Timeline:render()
             }),
         }),
         TimeFrameSingle = Roact.createElement("Frame", {
-            Size = UDim2.new(1, 0, 0, timeFrameY),
+            Size = UDim2.new(1, 0, 0, 0),
             BackgroundTransparency = .5,
             BackgroundColor3 = Color3.new(.5,1,.5),
             LayoutOrder = 200,
+            AutomaticSize = Enum.AutomaticSize.Y,
             Visible = keyframesN > 0,
         }, {
             TimeBar = Roact.createElement("Frame", {
                 Size = UDim2.new(0, 4, 1, 0),
                 AnchorPoint = Vector2.new(.5, 0),
                 Position = self.t:map(function(t)
-                    -- if t <= lifetime.Min then return UDim2.from(0, 0) end
-                    -- if t >= lifetime.Max then return UDim2.from(1, 0) end
                     return UDim2.fromScale(math.clamp((t - lifetime.Min)/(lifetime.Max - lifetime.Min), 0, 1), 0)
                 end),
                 BorderSizePixel = 0,
                 BackgroundColor3 = Color3.new(1, .4, .4),
                 ZIndex = 200,
             }),
-            TimelineSnaps = Roact.createElement("Frame", {
-                Size = UDim2.fromScale(1,1),
-                BackgroundTransparency = .5,
-                BackgroundColor3 = Color3.new(.5,1,.5),
-                ZIndex = 100,
-            }, self:getSnapLines()),
             TimelineContainer = Roact.createElement("Frame", {
                 Size = UDim2.fromScale(1,1),
                 BackgroundTransparency = .5,
                 BackgroundColor3 = Color3.new(.5,1,.5),
                 ZIndex = 150,
             }, joinDictionaries({
-                _Layout = Roact.createElement("UIListLayout", {
-                })
-            })),
+                _Layout = Roact.createElement("UIListLayout", {})
+            }, self:getAllKfs())),
         })
     })
 end

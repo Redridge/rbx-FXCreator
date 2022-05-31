@@ -1,3 +1,5 @@
+local Constants = require(script.Parent.Parent.Constants)
+
 function set(rbx, time, property, value)
     local ts = tostring(time)
     local kf = rbx:FindFirstChild(ts) or Instance.new("Folder")
@@ -48,7 +50,7 @@ function parse(rbx)
         for prop, val in pairs(atts) do
             if prop == "kf" then continue end
             local kf = kfs[prop] or {}
-            if not props[prop] then
+            if not props[prop] and not Constants.exceptedProps[prop] then
                 props[prop] = true
                 n += 1
             end

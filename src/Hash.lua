@@ -19,7 +19,13 @@ function getColor(s)
     return Color3.fromHSV(h,s,v)
 end
 
+function darkenColor(c)
+    local h,s,v = c:ToHSV()
+    return Color3.fromHSV(h,s,math.clamp(v-.2, 0, 1))
+end
+
 return {
     hstring = hstring,
-    getColor = getColor
+    getColor = getColor,
+    darkenColor = darkenColor,
 }

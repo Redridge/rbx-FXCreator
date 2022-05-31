@@ -40,7 +40,7 @@ local App = Roact.Component:extend("App")
 function App:init()
 	self:setState({
 		-- Collection
-		collectionCollapsed = false,
+		collectionCollapsed = true,
 		collectionFx = {},
 		collectionFxN = 0,
 		collectionSelected = "",
@@ -65,7 +65,7 @@ function App:init()
 		inputGlobalTFocused = false,
 
 		-- Timeline
-		timelineCollapsed = true,
+		timelineCollapsed = false,
 	})
 
 	self.propertyListener = nil
@@ -178,6 +178,7 @@ function App:getProperties(props)
 	local maxY = 5 * LABEL_HEIGHT
 	local rows = {}
 	for p, kfs in pairs(self.state.propertiesTracked) do
+		if Constants.exceptedProps[p] then continue end
 		rows[p] = self:getPropertiesRow(p, kfs)
 	end 
 	local Layout = Roact.createElement("UIListLayout", {
