@@ -45,6 +45,9 @@ function App:init()
 		collectionFxN = 0,
 		collectionSelected = "",
 		collectionCreateText = "",
+
+		collectionLifetimes = nil,
+		collectionLifetimesN = 0,
 		-- Elements
 		elementsCollapsed = false,
 
@@ -115,14 +118,32 @@ function App:didMount()
 		if #newSel == 1 then
 			local fx = FX.getFromChild(newSel[1])
 			if fx then
-				self:setState({collectionSelected = fx.Name, propertiesGlobalT = fx:GetAttribute("t") or 0})
+				local lfs, n = FX.getLfs(fx)
+				self:setState({
+					collectionSelected = fx.Name,
+					propertiesGlobalT = fx:GetAttribute("t") or 0,
+					collectionLifetimes = lfs,
+					collectionLifetimesN = n,
+				})
 				self:trackProperties(newSel[1])
 			else
-				self:setState({collectionSelected = "", propertyChanged = "", propertiesGlobalT = 0})
+				self:setState({
+					collectionSelected = "",
+					propertyChanged = "",
+					propertiesGlobalT = 0,
+					collectionLifetimes = Roact.None,
+					collectionLifetimesN = 0,
+				})
 				self:trackProperties()
 			end
 		else
-			self:setState({collectionSelected = "", propertyChanged = "", propertiesGlobalT = 0})
+			self:setState({
+				collectionSelected = "",
+				propertyChanged = "",
+				propertiesGlobalT = 0,
+				collectionLifetimes = Roact.None,
+				collectionLifetimesN = 0,
+			})
 			self:trackProperties()
 		end
 	end)
@@ -135,7 +156,8 @@ end
 function App:getCollectionRow(fx)
 	return Roact.createElement(Button, {
 		OnActivated = function()
-			self:setState({collectionSelected = fx.Name})
+			local lfs, n = FX.getLfs(fx)
+			self:setState({collectionSelected = fx.Name, collectionLifetimes = lfs, collectionLifetimesN = n})
 		end,
 		Text = fx.Name .. "    ",
 		Selected = fx.Name == self.state.collectionSelected,
@@ -199,17 +221,11 @@ end
 
 function App:render()
 	local timelineProps = {}
-	if self.state.collectionSelected ~= ""  then
-		local lfs, n = FX.getLfs(FX.get(self.state.collectionSelected))
-		timelineProps.Lifetimes = lfs
-		timelineProps.LifetimesN = n
-		if self.state.propertiesSelected then
-			local kfs, n, lf = FX.kfParse(self.state.propertiesSelected)
-			timelineProps.Keyframes = kfs
-			timelineProps.KeyframesN = n
-			timelineProps.Lifetime = lf
-		end
-	end
+	timelineProps.Lifetimes = self.state.collectionLifetimes
+	timelineProps.LifetimesN = self.state.collectionLifetimesN
+	timelineProps.Keyframes = self.state.propertiesTracked
+	timelineProps.KeyframesN = self.state.propertiesTrackedN
+	timelineProps.Lifetime = self.state.propertiesLf
 
 	return Roact.createFragment({
 		MainWindow = Roact.createElement("Frame", {
@@ -390,7 +406,17 @@ function App:render()
 					FX.kfSetLf(self.state.propertiesSelected, newR)
            			self:setState({propertiesLf = newR})
 				end,
+				OnElementSelected = function(elem)
+					local kfs, n, lf = FX.kfParse(elem)
+					self:setState({propertiesTracked = kfs, propertiesTrackedN = n, propertiesLf = lf, propertiesSelected = elem})
+				end,
+				OnKeyframeChanged = function(newKfs)
+					FX.kfSetAll(self.state.propertiesSelected, newKfs)
+					local kfs, n, lf = FX.kfParse(self.state.propertiesSelected)
+					self:setState({propertiesTracked = kfs, propertiesTrackedN = n, propertiesLf = lf})
+				end,
 				MaxT = self.state.propertiesGlobalT,
+				ElementRbx = self.state.propertiesSelected,
 			}, timelineProps)),
 		})})
 end

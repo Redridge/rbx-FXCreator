@@ -1,3 +1,4 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Plugin = script.Parent.Parent
@@ -12,15 +13,16 @@ local Label = require(Plugin.Components.Label)
 local TextInput = require(Plugin.Components.TextInput)
 local ImageButton = require(Plugin.Components.ImageButton)
 
-local debug = false
+local _debug = false
 function dprint(...)
-    if debug then print(...) end
+    if _debug then print(...) end
 end
 
 function round(t, d)
     return math.round(t * math.pow(10, d))/math.pow(10, d)
 end
 
+local noop = function() end
 local defaultProps = {
     MaxT = 1,
     LayoutOrder = 0,
@@ -30,9 +32,11 @@ local defaultProps = {
     KeyframesN = 0,
     Lifetimes = {},
     LifetimesN = 0,
-    OnKeyframeChanged = function() end,
-    OnLifetimeChanged = function() end,
-    OnGlobalTimeChanged = function() end,
+    ElementRbx = nil,
+    OnElementSelected = noop,
+    OnKeyframeChanged = noop,
+    OnLifetimeChanged = noop,
+    OnGlobalTimeChanged = noop,
 }
 
 local propsToScrub = {
@@ -42,6 +46,8 @@ local propsToScrub = {
     Lifetime = Roact.None,
     Lifetimes = Roact.None,
     LifetimesN = Roact.None,
+    ElementRbx = Roact.None,
+    OnElementSelected = Roact.None,
     OnKeyframeChanged = Roact.None,
     OnLifetimeChanged = Roact.None,
     OnGlobalTimeChanged = Roact.None,
@@ -69,13 +75,19 @@ function Timeline:init()
         inputStepFocused = false,
 
         -- lf input
-		inputLfMin = nil,
-		inputLfMinFocused = false,
-		inputLfMax = nil,
-		inputLfMaxFocused = false,
+        inputLfMin = nil,
+        inputLfMinFocused = false,
+        inputLfMax = nil,
+        inputLfMaxFocused = false,
 
-        -- timeline
-        drawAll = true,
+        -- keyframe
+        keyframeHovered = nil,
+        keyframeSelected = nil,
+        inputKfTime = nil,
+        inputKfTimeFocused = false,
+
+        -- element
+        elementPropTexts = {},
     })
     self.t, self.updateT = Roact.createBinding(0)
 end
@@ -106,11 +118,46 @@ function Timeline:getSnapLines()
     return lines
 end
 
+function Timeline:trackRbx(rbx)
+    if self.trackListener then
+        self.trackListener:Disconnect()
+        self.trackListener = nil
+    end
+    if not rbx then return end
+
+    if not self.state.keyframeSelected then return end
+    local prop = self.state.keyframeSelected.prop
+    local t = self.state.keyframeSelected.time
+    local trackedVal = self.props.Keyframes[prop][t].value
+    local actualVal = rbx[prop]
+
+    self.trackListener = rbx:GetPropertyChangedSignal(prop):Connect(function()
+        local actualVal = rbx[prop]
+        self:setState({elementPropTexts = {
+            tracked = tostring(trackedVal),
+            actual = tostring(actualVal)
+        }})
+    end)
+
+    self:setState({elementPropTexts = {
+        tracked = tostring(trackedVal),
+        actual = tostring(actualVal)
+    }})
+end
+
 function Timeline:didUpdate(prevProps, prevState)
     if prevState.playing == false and self.state.playing == true then
         dprint("Started Playing")
     elseif prevState.playing == true and self.state.playing == false then
         dprint("Stopped Playing")
+    end
+
+    local rbx = self.props.ElementRbx
+    if prevProps.ElementRbx ~= rbx then
+        self:setState({keyframeSelected = Roact.None})
+        self.state.keyframeSelected = nil
+        print(self.state.keyframeSelected)
+        self:trackRbx(rbx)
     end
 end
 
@@ -159,22 +206,47 @@ function Timeline:getAllFX()
                 BackgroundColor3 = Hash.getColor(rbx.Name),
                 Text = rbx.Name,
                 BackgroundTransparency = 0,
+                [Roact.Event.Activated] = function()
+                    self.props.OnElementSelected(rbx)
+                end,
         }),
     })
     end
     return fx
 end
 
-function Timeline:getKfs(prop)
+function Timeline:getKfs(prop, propName)
     local kfs = {}
+
+    local hoveredKf = self.state.keyframeHovered or {}
+    local hoveredProp, hoveredTime = hoveredKf.prop, hoveredKf.time
+    local selectedKf = self.state.keyframeSelected or {}
+    local selectedProp, selectedTime = selectedKf.prop, selectedKf.time
+
     for kf, val in pairs(prop) do
+        local isHovered = hoveredProp == propName and tostring(hoveredTime) == kf
+        local isSelected = selectedProp == propName and tostring(selectedTime) == kf
+
+        local color = Color3.new(1,1,1)
+        if isHovered then color = Color3.fromRGB(0, 162, 255) end
+        if isSelected then color = Color3.new(.8,.6,.4) end
         kfs[kf] = Roact.createElement("ImageButton", {
             Size = UDim2.fromOffset(Constants.LABEL_HEIGHT/1.5, Constants.LABEL_HEIGHT/1.5),
             AnchorPoint = Vector2.new(.5, 0),
             Position = UDim2.fromScale(tostring(kf), 0),
             Image = "rbxasset://textures/AnimationEditor/img_key_indicator_inner.png",
-            ImageColor3 = Color3.new(1,1,1),
+            ImageColor3 = color,
             BackgroundTransparency = 1,
+            [Roact.Event.Activated] = function()
+                self:setState({keyframeSelected = joinDictionaries(val, {time = kf, prop = propName})})
+                self:trackRbx(self.props.ElementRbx)
+            end,
+            [Roact.Event.MouseEnter] = function()
+                self:setState({keyframeHovered = joinDictionaries(val, {time = kf, prop = propName})})
+            end,
+            [Roact.Event.MouseLeave] = function()
+                self:setState({keyframeHovered = Roact.None})
+            end,
         }, {
             Outline = Roact.createElement("ImageLabel", {
                 Size = UDim2.fromScale(1,1),
@@ -217,9 +289,37 @@ function Timeline:getAllKfs()
                 BackgroundColor3 = Color3.new(.5,1,.5),
                 ZIndex = -151,
             }, self:getSnapLines()),
-        }, self:getKfs(ks)))
+        }, self:getKfs(ks, prop)))
     end
     return props
+end
+
+function deepClone(tbl)
+	local clone = {}
+
+	for key,val in pairs(tbl) do
+		if typeof(val) == "table" then
+			clone[key] = deepClone(val)
+		else
+			clone[key] = val
+		end
+	end
+
+	return clone
+end
+
+function Timeline:changeKfTime(newKf)
+    local prop = newKf.prop
+    local t = tostring(newKf.time) -- this is str
+    local kf = {
+        value = newKf.value,
+        es = newKf.es,
+        ed = newKf.ed,
+    }
+    local kfsClone = deepClone(self.props.Keyframes)
+    kfsClone[prop][tostring(self.state.keyframeSelected.time)] = nil
+    kfsClone[prop][t] = kf
+    return kfsClone
 end
 
 function Timeline:render()
@@ -236,7 +336,9 @@ function Timeline:render()
     local keyframes = self.props.Keyframes
     local keyframesN = self.props.KeyframesN or 0
 
-	return Roact.createElement("Frame", joinDictionaries(defaultProps, self.props, {
+    local keyframeSelected = self.state.keyframeSelected or {}
+
+    return Roact.createElement("Frame", joinDictionaries(defaultProps, self.props, {
         Size = UDim2.new(1, 0, 0, timeFrameY + Constants.LABEL_HEIGHT),
         BackgroundTransparency = 1,
     }, propsToScrub), {
@@ -343,16 +445,16 @@ function Timeline:render()
                     HorizontalAlignment = Enum.HorizontalAlignment.Left,
                     Padding = UDim.new(0, 2)
                 }),
-				TimeInput = Roact.createElement(TextInput, {
+                TimeInput = Roact.createElement(TextInput, {
                     LayoutOrder = 0,
-					Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
-					Text = if self.state.inputTimeFocused then self.state.inputTime else self.t:map(function(t)
+                    Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
+                    Text = if self.state.inputTimeFocused then self.state.inputTime else self.t:map(function(t)
                         return tostring(round(t * MaxT, 3))
                     end),
                     TextXAlignment = Enum.TextXAlignment.Center,
-					OnChanged = function(txt)
-						self:setState({inputTime = txt})
-					end,
+                    OnChanged = function(txt)
+                        self:setState({inputTime = txt})
+                    end,
                     OnFocusLost = function()
                         if self.state.inputTime then
                             local newT = tonumber(self.state.inputTime)
@@ -366,21 +468,21 @@ function Timeline:render()
                     OnFocused = function()
                         self:setState({inputTime = "", inputTimeFocused = true})
                     end,
-				}),
+                }),
                 Div = Roact.createElement(Label, {
                     Size = UDim2.fromOffset(Constants.LABEL_HEIGHT-4, Constants.LABEL_HEIGHT-3),
                     Text = "/",
                     LayoutOrder = 5,
                     BackgroundTransparency = 1,
                 }),
-				MaxTimeInput = Roact.createElement(TextInput, {
+                MaxTimeInput = Roact.createElement(TextInput, {
                     LayoutOrder = 10,
-					Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
-					Text = if self.state.inputMaxTimeFocused then self.state.inputMaxTime else MaxT,
+                    Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
+                    Text = if self.state.inputMaxTimeFocused then self.state.inputMaxTime else MaxT,
                     TextXAlignment = Enum.TextXAlignment.Center,
-					OnChanged = function(txt)
-						self:setState({inputMaxTime = txt})
-					end,
+                    OnChanged = function(txt)
+                        self:setState({inputMaxTime = txt})
+                    end,
                     OnFocusLost = function()
                         if self.state.inputMaxTime then
                             local newT = tonumber(self.state.inputMaxTime)
@@ -396,21 +498,21 @@ function Timeline:render()
                     OnFocused = function()
                         self:setState({inputMaxTime = "", inputMaxTimeFocused = true})
                     end,
-				}),
+                }),
                 StepText = Roact.createElement(Label, {
                     Size = UDim2.fromOffset(Constants.LABEL_HEIGHT*2, Constants.LABEL_HEIGHT-3),
                     Text = "  Step:",
                     LayoutOrder = 15,
                     BackgroundTransparency = 1,
                 }),
-				StepInput = Roact.createElement(TextInput, {
+                StepInput = Roact.createElement(TextInput, {
                     LayoutOrder = 20,
-					Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
-					Text = if self.state.inputStepFocused then self.state.inputStep else self.state.step,
+                    Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
+                    Text = if self.state.inputStepFocused then self.state.inputStep else self.state.step,
                     TextXAlignment = Enum.TextXAlignment.Center,
-					OnChanged = function(txt)
-						self:setState({inputStep = txt})
-					end,
+                    OnChanged = function(txt)
+                        self:setState({inputStep = txt})
+                    end,
                     OnFocusLost = function()
                         if self.state.inputStep then
                             local newT = tonumber(self.state.inputStep)
@@ -425,7 +527,7 @@ function Timeline:render()
                     OnFocused = function()
                         self:setState({inputStep = "", inputStepFocused = true})
                     end,
-				}),
+                }),
             }),
         }),
         TimeFrameGlobal = Roact.createElement("Frame", {
@@ -469,81 +571,81 @@ function Timeline:render()
             LayoutOrder = 150,
             Visible = keyframesN > 0,
         }, {
-			PropertiesLf = Roact.createElement("Frame", {
-				Size = UDim2.fromScale(.5, 1),
-				Position = UDim2.fromScale(.5, .20),
-				BackgroundColor3 = Color3.new(1, .5, .5),
-				BackgroundTransparency = 1,
-				Visible = self.state.propertiesSelected,
-			}, {
-               	Padding = Roact.createElement("UIPadding", {
-                   	PaddingBottom = UDim.new(0, 1),
-                   	PaddingTop = UDim.new(0, 1),
-                   	PaddingLeft = UDim.new(0.1, 0),
-                   	PaddingRight = UDim.new(0.1, 0),
-               	}),
-               	_Layout = Roact.createElement("UIListLayout", {
-                   	SortOrder = Enum.SortOrder.LayoutOrder,
-                   	FillDirection = Enum.FillDirection.Horizontal,
-                   	HorizontalAlignment = Enum.HorizontalAlignment.Left,
-                   	Padding = UDim.new(0, 10)
-               	}),
-               	LfText = Roact.createElement(Label, {
-                   	Size = UDim2.fromOffset(Constants.LABEL_HEIGHT*2, Constants.LABEL_HEIGHT-3),
-                   	Text = "Lifetime:",
-                   	LayoutOrder = 15,
-                   	BackgroundTransparency = 1,
-               	}),
-				LfInputMin = Roact.createElement(TextInput, {
-                   	LayoutOrder = 20,
-					Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
-					Text = if self.state.inputLfMinFocused then self.state.inputLfMin else round(lifetime.Min, 3),
-                   	TextXAlignment = Enum.TextXAlignment.Center,
-					OnChanged = function(txt)
-						self:setState({inputLfMin = txt})
-					end,
-                   	OnFocusLost = function()
-						local c = self.state.inputLfMin
-                       	if c then
-                           	local newT = tonumber(c)
-                           	if newT and newT < lifetime.Max then
-								local newR = NumberRange.new(newT, round(lifetime.Max, 3))
-                               	self:setState({inputLfMin = Roact.None, inputLfMinFocused = false})
-								self.props.OnLifetimeChanged(newR)
-                               	return
-                           	end
-                           	self:setState({inputLfMin = Roact.None, inputLfMinFocused = false})
-                       	end
-                   	end,
-                   	OnFocused = function()
-                       	self:setState({inputLfMin = "", inputLfMinFocused = true})
-                   	end,
-				}),
-				LfInputMax = Roact.createElement(TextInput, {
-                   	LayoutOrder = 20,
-					Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
-					Text = if self.state.inputLfMaxFocused then self.state.inputLfMax else round(lifetime.Max, 3),
-                   	TextXAlignment = Enum.TextXAlignment.Center,
-					OnChanged = function(txt)
-						self:setState({inputLfMax = txt})
-					end,
-                   	OnFocusLost = function()
-						local c = self.state.inputLfMax
-                       	if c then
-                           	local newT = tonumber(c)
-                           	if newT and newT > lifetime.Min then
-								local newR = NumberRange.new(round(lifetime.Min, 3), newT)
-                               	self:setState({inputLfMax = Roact.None, inputLfMaxFocused = false})
-								self.props.OnLifetimeChanged(newR)
-                               	return
-                           	end
-                           	self:setState({inputLfMax = Roact.None, inputLfMaxFocused = false})
-                       	end
-                   	end,
-                   	OnFocused = function()
-                       	self:setState({inputLfMax = "", inputLfMaxFocused = true})
-                   	end,
-				}),
+            PropertiesLf = Roact.createElement("Frame", {
+                Size = UDim2.fromScale(.5, 1),
+                Position = UDim2.fromScale(.5, .20),
+                BackgroundColor3 = Color3.new(1, .5, .5),
+                BackgroundTransparency = 1,
+                Visible = self.state.propertiesSelected,
+            }, {
+                   Padding = Roact.createElement("UIPadding", {
+                       PaddingBottom = UDim.new(0, 1),
+                       PaddingTop = UDim.new(0, 1),
+                       PaddingLeft = UDim.new(0.1, 0),
+                       PaddingRight = UDim.new(0.1, 0),
+                   }),
+                   _Layout = Roact.createElement("UIListLayout", {
+                       SortOrder = Enum.SortOrder.LayoutOrder,
+                       FillDirection = Enum.FillDirection.Horizontal,
+                       HorizontalAlignment = Enum.HorizontalAlignment.Left,
+                       Padding = UDim.new(0, 10)
+                   }),
+                   LfText = Roact.createElement(Label, {
+                       Size = UDim2.fromOffset(Constants.LABEL_HEIGHT*2, Constants.LABEL_HEIGHT-3),
+                       Text = "Lifetime:",
+                       LayoutOrder = 15,
+                       BackgroundTransparency = 1,
+                   }),
+                LfInputMin = Roact.createElement(TextInput, {
+                       LayoutOrder = 20,
+                    Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
+                    Text = if self.state.inputLfMinFocused then self.state.inputLfMin else round(lifetime.Min, 3),
+                       TextXAlignment = Enum.TextXAlignment.Center,
+                    OnChanged = function(txt)
+                        self:setState({inputLfMin = txt})
+                    end,
+                       OnFocusLost = function()
+                        local c = self.state.inputLfMin
+                           if c then
+                               local newT = tonumber(c)
+                               if newT and newT < lifetime.Max then
+                                local newR = NumberRange.new(newT, round(lifetime.Max, 3))
+                                   self:setState({inputLfMin = Roact.None, inputLfMinFocused = false})
+                                self.props.OnLifetimeChanged(newR)
+                                   return
+                               end
+                               self:setState({inputLfMin = Roact.None, inputLfMinFocused = false})
+                           end
+                       end,
+                       OnFocused = function()
+                           self:setState({inputLfMin = "", inputLfMinFocused = true})
+                       end,
+                }),
+                LfInputMax = Roact.createElement(TextInput, {
+                       LayoutOrder = 20,
+                    Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
+                    Text = if self.state.inputLfMaxFocused then self.state.inputLfMax else round(lifetime.Max, 3),
+                       TextXAlignment = Enum.TextXAlignment.Center,
+                    OnChanged = function(txt)
+                        self:setState({inputLfMax = txt})
+                    end,
+                       OnFocusLost = function()
+                        local c = self.state.inputLfMax
+                           if c then
+                               local newT = tonumber(c)
+                               if newT and newT > lifetime.Min then
+                                local newR = NumberRange.new(round(lifetime.Min, 3), newT)
+                                   self:setState({inputLfMax = Roact.None, inputLfMaxFocused = false})
+                                self.props.OnLifetimeChanged(newR)
+                                   return
+                               end
+                               self:setState({inputLfMax = Roact.None, inputLfMaxFocused = false})
+                           end
+                       end,
+                       OnFocused = function()
+                           self:setState({inputLfMax = "", inputLfMaxFocused = true})
+                       end,
+                }),
             }),
         }),
         TimeFrameSingle = Roact.createElement("Frame", {
@@ -572,7 +674,85 @@ function Timeline:render()
             }, joinDictionaries({
                 _Layout = Roact.createElement("UIListLayout", {})
             }, self:getAllKfs())),
-        })
+        }),
+        PropertiesLf = Roact.createElement("Frame", {
+            Size = UDim2.new(1, 0, 0, Constants.LABEL_HEIGHT*2),
+            BackgroundColor3 = Color3.new(1, .5, .5),
+            BackgroundTransparency = .5,
+            Visible = self.state.keyframeSelected ~= nil,
+            LayoutOrder = 10000,
+        }, {
+            Padding = Roact.createElement("UIPadding", {
+                PaddingBottom = UDim.new(0, 1),
+                PaddingTop = UDim.new(0.1, 0),
+                PaddingLeft = UDim.new(0.1, 0),
+                PaddingRight = UDim.new(0.1, 0),
+            }),
+            _Layout = Roact.createElement("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                FillDirection = Enum.FillDirection.Horizontal,
+                HorizontalAlignment = Enum.HorizontalAlignment.Left,
+                Padding = UDim.new(0, 10)
+            }),
+            KfTimeText = Roact.createElement(Label, {
+                Size = UDim2.fromOffset(Constants.LABEL_HEIGHT*2, Constants.LABEL_HEIGHT-3),
+                Text = "Time:",
+                LayoutOrder = 15,
+                BackgroundTransparency = 1,
+            }),
+            KfTimeInput = Roact.createElement(TextInput, {
+                LayoutOrder = 20,
+                Size = UDim2.new(0, Constants.LABEL_HEIGHT*2, 0, Constants.LABEL_HEIGHT-4),
+                Text = if self.state.inputKfTimeFocused then self.state.inputKfTime else keyframeSelected.time or "",
+                TextXAlignment = Enum.TextXAlignment.Center,
+                OnChanged = function(txt)
+                    self:setState({inputKfTime = txt})
+                end,
+                OnFocusLost = function()
+                    local c = self.state.inputKfTime
+                    if c then
+                        local newT = tonumber(c)
+                        if newT then
+                            newT = math.clamp(newT, 0, 1)
+                            local cKf = self.state.keyframeSelected
+                            local newKf = {
+                                value = cKf.value,
+                                es = cKf.es,
+                                ed = cKf.ed,
+                                time = newT,
+                                prop = cKf.prop
+                            }
+                            local newKfs = self:changeKfTime(newKf)
+                            self:setState({inputKfTime = Roact.None, inputKfTimeFocused = false, keyframeSelected = newKf})
+                            self.props.OnKeyframeChanged(newKfs)
+                            return
+                        end
+                        self:setState({inputLfMin = Roact.None, inputLfMinFocused = false})
+                    end
+                end,
+                OnFocused = function()
+                    self:setState({inputLfMin = "", inputLfMinFocused = true})
+                end,
+            }),
+            KfValueText = Roact.createElement(Label, {
+                Size = UDim2.fromOffset(Constants.LABEL_HEIGHT*2, Constants.LABEL_HEIGHT-3),
+                Text = "V:",
+                LayoutOrder = 25,
+                BackgroundTransparency = 1,
+            }),
+            KfValueTracked = Roact.createElement(Label, {
+                Size = UDim2.fromOffset(Constants.LABEL_HEIGHT*2, Constants.LABEL_HEIGHT-3),
+                Text = self.state.elementPropTexts.tracked or "",
+                LayoutOrder = 35,
+                BackgroundTransparency = 1,
+            }),
+            KfValueActual = Roact.createElement(Label, {
+                Size = UDim2.fromOffset(Constants.LABEL_HEIGHT*2, Constants.LABEL_HEIGHT-3),
+                Text = self.state.elementPropTexts.actual or "",
+                LayoutOrder = 45,
+                BackgroundTransparency = 1,
+            }),
+        }),
     })
 end
 

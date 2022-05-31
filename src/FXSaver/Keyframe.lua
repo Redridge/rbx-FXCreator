@@ -1,12 +1,23 @@
 local Constants = require(script.Parent.Parent.Constants)
 
-function set(rbx, time, property, value)
+function set(rbx, time, property, value, es, ed)
     local ts = tostring(time)
     local kf = rbx:FindFirstChild(ts) or Instance.new("Folder")
 
     kf.Name = tostring(time)
     kf:SetAttribute("kf", true)
     kf:SetAttribute(property, value)
+
+    if es then
+        local esDir = kf:FindFirstChild("_ES") or Instance.new("Folder", kf)
+        esDir.Name = "_ES"
+        esDir:SetAttribute(property, es)
+    end
+    if ed then
+        local edDir = kf:FindFirstChild("_ED") or Instance.new("Folder", kf)
+        edDir.Name = "_ED"
+        edDir:SetAttribute(property, ed)
+    end
     kf.Parent = rbx
 end
 
@@ -33,6 +44,19 @@ function delete(rbx, time, property)
     end
 end
 
+function setAll(rbx, kfs)
+    local cld = rbx:GetChildren()
+    for i, c in ipairs(cld) do
+        if c:IsA("Folder") then c:Destroy() end
+    end
+
+    for prop, ks in pairs(kfs) do
+        for t, keys in pairs(ks) do
+            set(rbx, t, prop, keys.value, keys.es, keys.ed)
+        end
+    end
+end
+
 function parse(rbx)
     local lf = rbx:GetAttribute("lf")
     if not lf then return {}, 0 end
@@ -47,6 +71,15 @@ function parse(rbx)
         local atts = kfd:GetAttributes()
         if not atts.kf then continue end
 
+        local esDir = kfd:FindFirstChild("_ES")
+        local edDir = kfd:FindFirstChild("_ED")
+
+        local es = {}
+        local ed = {}
+
+        if esDir then es = esDir:GetAttributes() end
+        if edDir then ed = edDir:GetAttributes() end
+
         for prop, val in pairs(atts) do
             if prop == "kf" then continue end
             local kf = kfs[prop] or {}
@@ -54,7 +87,8 @@ function parse(rbx)
                 props[prop] = true
                 n += 1
             end
-            kf[kfd.Name] = val
+
+            kf[kfd.Name] = {value = val, es = es[prop], ed = ed[prop]}
             kfs[prop] = kf
         end
     end
@@ -64,6 +98,7 @@ end
 
 return {
     set = set,
+    setAll = setAll,
     del = delete,
     parse = parse,
     setLf = setLf,

@@ -98,6 +98,7 @@ return {
     remove = remove,
 
     kfSet = Keyframe.set,
+    kfSetAll = Keyframe.setAll,
     kfDel = Keyframe.del,
     kfParse = Keyframe.parse,
     kfSetLf = Keyframe.setLf,
